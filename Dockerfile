@@ -1,4 +1,4 @@
-FROM node:0.10
+FROM node:10-alpine
 
 COPY package.json /src/package.json
 COPY server.js /src/server.js
