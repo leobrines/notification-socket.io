@@ -1,6 +1,11 @@
 var app = require('express')();
 var http = require('http').Server(app);
-var io = require('socket.io')(http);
+var io = require('socket.io')(http, {
+	cors: {
+		origin: process.env.CORS_ORIGIN || '*',
+		methods: ["GET", "POST"]
+	}
+});
 var bodyParser = require('body-parser');
 
 app.set('port', (process.env.PORT || 3000));
