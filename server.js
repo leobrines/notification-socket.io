@@ -27,6 +27,8 @@ var pushService = (function() {
 		 * @param connectionId id of connection.
 		 */
 		registerUser: function(userId, connectionId) {
+			console.log(`Register user: userId '${userId}' connectionId '${connectionId}'`)
+
 			if (connections[userId] === undefined) {
 				connections[userId] = {};
 			}
@@ -43,6 +45,8 @@ var pushService = (function() {
 		 * @returns {boolean} if socket was registered or not, if false then you have to do everything again.
 		 */
 		registerSocket: function(userId, connectionId, socket) {
+			console.log(`Register socket: userId '${userId}' connectionId '${connectionId}' socket '${socket}'`)
+
 			if (connections[userId] != null && connections[userId][connectionId] == null) {
 				socket.userId = userId;
 				socket.connectionId = connectionId;
@@ -59,6 +63,8 @@ var pushService = (function() {
 		 * @param socket socket to remove.
 		 */
 		removeConnection: function(socket) {
+			console.log(`Remove connection: socket '${socket}'`)
+
 			var userId = socket.userId;
 			var connectionId = socket.connectionId;
 			if (userId && connectionId && connections[userId] && connections[userId][connectionId]) {
@@ -72,6 +78,8 @@ var pushService = (function() {
 		 * @param message message.
 		 */
 		pushMessage: function(userId, message) {
+			console.log(`Push message: userId '${userId}' message '${message}'`)
+
 			var userConnections = connections[userId];
 			if (userConnections) {
 				for (var connectionId in  userConnections) {
@@ -91,6 +99,8 @@ var pushService = (function() {
  * Handle connection to socket.io.
  */
 io.on('connection', function(socket) {
+	console.log(`New connection: socket '${socket}`)
+		
 	/**
 	 * On registered socket from client.
 	 */
