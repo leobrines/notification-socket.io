@@ -1,6 +1,7 @@
 var app = require('express')();
 var http = require('http').Server(app);
 var io = require('socket.io')(http, {
+	path: '/socket.io',
 	cors: {
 		origin: process.env.CORS_ORIGIN || '*',
 		methods: ["GET", "POST"]
