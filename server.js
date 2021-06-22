@@ -1,4 +1,5 @@
-var app = require('express')();
+var express = require('express')
+var app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http, {
 	path: '/socket.io',
@@ -7,13 +8,11 @@ var io = require('socket.io')(http, {
 		methods: ["GET", "POST"]
 	}
 });
-var bodyParser = require('body-parser');
-const { MongoClient } = require("mongodb");
 
 app.set('port', (process.env.PORT || 3000));
 
-app.use(bodyParser.urlencoded({extended: true}));
-app.use(bodyParser.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 /**
  * Configuration from package.json
@@ -22,132 +21,70 @@ var pjson = require('./package.json');
 
 var connectionService = connectionServiceInMemory();
 
-function connectionServiceMongo(client) {
-	console.log("Using mongo storage")
-
-	const database = client.db(process.env.MONGO_DBNAME);
-	const users = database.collection('users')
-
-	return {
-		registerUser: async function(userId, connectionId) {
-			const filter = { _id: userId };
-			const options = { upsert: true };
-
-			const updateDoc = {
-				$push: {
-				  connections: {
-					  id: connectionId,
-					  body: null,
-					  registeredDate: new Date()
-				  }
-				}
-			};
-		  
-			await users.updateOne(filter, updateDoc, options);
-		
-			console.log(`[Mongo] Connection '${connectionId}' added to user ${userId}`)
-		},
-		isEmptyConnection: async function(userId, connectionId) {
-			const query = { _id: userId };
-
-			const user = await users.findOne(query);
-			if (!user) {
-				return false
-			}
-
-			for (let connection of user.connections) {
-				if (connection.id === connectionId) {
-					return connection.body == null
-				}
-			}
-
-			return false
-		},
-		saveConnection: async function(userId, connectionId, body) {
-			const filter = { _id: userId };
-
-			const options = { upsert: true };
-
-			const updateDoc = {
-				$push: {
-					connections: {
-						id: connectionId,
-						body: body,
-						savedDate: new Date()
-					}
-				}
-			};
-			
-			await users.updateOne(filter, updateDoc, options);
-		
-			console.log(`[Mongo] Body connection '${connectionId}' saved to user ${userId}`)
-		},
-		removeConnection: async function(userId, connectionId) {
-			const filter = { _id: userId };
-
-			const updateDoc = {
-				$pull: {
-					connections: {
-						id: connectionId
-					}
-				}
-			};
-			
-			await users.updateOne(filter, updateDoc);
-		
-			console.log(`[Mongo] Connection '${connectionId}' removed from user ${userId}`)
-		},
-		getConnection: async function(userId, connectionId) {
-			const query = { _id: userId };
-
-			const user = await users.findOne(query);
-			if (!user) {
-				return null
-			}
-
-			for (let connection of user.connections) {
-				if (connection.id === connectionId) {
-					return connection.body
-				}
-			}
-
-			return null
-		}
-	}
-}
-
 function connectionServiceInMemory() {
 	console.log("Using in-memory storage")
 
-	var connections = {}
+	var socketStorage = {}
+	var userSocketStorage = {}
+
 	return {
-		registerUser: function(userId, connectionId) {
-			if (connections[userId] === undefined) {
-				connections[userId] = {};
+		associateSocketToUser: function(userId, socketId) {
+			console.log(`[Associate socket] Socket '${socketId}'`)
+
+			if (socketStorage[socketId] === undefined || socketStorage[socketId] === null) {
+				console.log("[Associate socket] Socket does not exists")
+				return
 			}
 
-			connections[userId][connectionId] = null;
-		},
-		isEmptyConnection: function(userId, connectionId) {
-			return userId && connectionId && connections[userId] != null && connections[userId][connectionId] == null
-		},
-		saveConnection: function(userId, connectionId, body) {
-			connections[userId][connectionId] = body;
-		},
-		removeConnection: function(userId, connectionId) {
-			delete connections[userId][connectionId];
-		},
-		getConnection: function(userId, connectionId) {
-			var userConnections = connections[userId];
-			if (userConnections) {
-				for (var connectionId in  userConnections) {
-					if (userConnections.hasOwnProperty(connectionId)) {
-						return userConnections[connectionId];
-					}
-				}
+			if (socketStorage[socketId].userId & socketStorage[socketId].userId !== "") {
+				console.log("[Associate socket] Socket already associated to other user")
+				return
 			}
 
-			return null
+			if (userSocketStorage[socketId] === undefined || userSocketStorage[userId] === null) {
+				userSocketStorage[userId] = {};
+
+				console.log(`[Associate socket] Initialized user '${userId}''`)
+			}
+
+			// Just for know if associated to user
+			userSocketStorage[userId][socketId] = socketStorage[socketId];
+
+			socketStorage[socketId].userId = userId
+
+			console.log(`[Associate socket] Socket '${socketId}' asociated to user '${userId}''`)
+		},
+		saveSocket: function(socket) {
+			socketStorage[socket.id] = socket
+			console.log(`[Save socket] Socket saved '${socket.id}'`)
+		},
+		removeConnection: function(socketId) {
+			var userId = socketStorage[socketId].userId
+
+			if (userId && userSocketStorage[userId]) {
+				delete userSocketStorage[userId][socketId];
+			}
+			if (socketStorage[socketId]) {
+				delete socketStorage[socketId];
+			}
+
+			console.log(`[Remove socket] Socket removed '${socketId}'`)
+		},
+		getUserSockets: function(userId) {
+			var socketsMap = userSocketStorage[userId];
+			if (socketsMap === undefined || socketsMap === null) {
+				console.log("[Get user sockets] Not found user sockets")
+				return []
+			}
+
+			var result = []
+			for (let socketId in socketsMap) {
+				result.push(socketsMap[socketId])
+			}
+
+			console.log(`[Get user sockets] User sockets got '${userId}'`)
+
+			return result
 		}
 	}
 }
@@ -159,50 +96,36 @@ function newPushService() {
 		/**
 		 * Register user in connections. This method must be executed as first in whole registration process.
 		 * @param userId id of user.
-		 * @param connectionId id of connection.
+		 * @param socketId id of connection.
 		 */
-		registerUser: async function(userId, connectionId) {
-			console.log(`Register user: userId '${userId}' connectionId '${connectionId}'`)
+		registerUserSocketId: async function(userId, socketId) {
+			console.log(`Associate socket '${socketId}' to user '${userId}'`)
 
-			await connectionService.registerUser(userId, connectionId)
+			await connectionService.associateSocketToUser(userId, socketId)
 
-			console.log('Registered connection ' + connectionId.substring(0, 4) + '*** for user ' + userId);
+			console.log(`Success socket association '${socketId}' to user '${userId}'`)
 		},
 		/**
-		 * Register socket to communication. Must be executed after registerUser.
-		 * Modify socket object and set field userId and connectionId.
-		 * @param userId id of user.
-		 * @param connectionId id of connection.
+		 * Save socket. This method must be executed as first in whole registration process.
 		 * @param socket socket.
-		 * @returns {boolean} if socket was registered or not, if false then you have to do everything again.
 		 */
-		registerSocket: async function(userId, connectionId, socket) {
-			console.log(`Register socket: userId '${userId}' connectionId '${connectionId}' socket '${socket}'`)
+		saveSocket: async function(socket) {
+			console.log(`Saving socket:  '${socket.id}'`)
 
-			if (await connectionService.isEmptyConnection(userId, connectionId)) {
-				socket.userId = userId;
-				socket.connectionId = connectionId;
-				await connectionService.saveConnection(userId, connectionId, socket);
-				console.log('Registered socket for connection ' + connectionId.substring(0, 4) + '*** and  user ' + userId);
-				return true;
-			} else {
-				console.log('Not found empty conn for connection ' + connectionId.substring(0, 4) + '*** and  user ' + userId);
-				return false;
-			}
+			await connectionService.saveSocket(socket);
+
+			console.log(`Success socket saved:  '${socket.id}'`)
 		},
 		/**
 		 * Remove connection.
 		 * @param socket socket to remove.
 		 */
-		removeConnection: async function(socket) {
-			console.log(`Remove connection: socket '${socket}'`)
+		removeConnection: async function(socketId) {
+			console.log(`Remove socket '${socketId}'`)
 
-			var userId = socket.userId;
-			var connectionId = socket.connectionId;
+			await connectionService.removeConnection(socketId);
 
-			await connectionService.removeConnection(userId, socket.connectionId);
-			
-			console.log('Removed socket for user ' + userId + ' and connection: ' + connectionId.substring(0, 4) + '***');
+			console.log(`Success removing socket '${socketId}'`)
 		},
 		/**
 		 * Send notification to user.
@@ -212,9 +135,11 @@ function newPushService() {
 		pushMessage: async function(userId, message) {
 			console.log(`Push message: userId '${userId}' message '${message}'`)
 
-			var socket = await connectionService.getConnection(userId, connectionId);
-			if (socket != null) {
+			var userSockets = await connectionService.getUserSockets(userId);
+
+			for (let socket of userSockets) {
 				socket.emit('message', message);
+				console.log("Success push message")
 			}
 		}
 	}
@@ -225,33 +150,28 @@ function newPushService() {
  */
 io.on('connection', function(socket) {
 	console.log(`New connection: socket '${socket}`)
-		
-	/**
-	 * On registered socket from client.
-	 */
-	socket.on('register', async function(userId, connectionId) {
-		await pushService.registerSocket(userId, connectionId, socket);
-	});
+
+	pushService.saveSocket(socket)
 
 	/**
 	 * On disconnected socket.
 	 */
 	socket.on('disconnect', async function() {
-		await pushService.removeConnection(socket);
+		await pushService.removeConnection(socket.id);
 	});
 });
 
 /**
- * Api to register user.
+ * Api to register user socket id.
  */
-app.put('/api/:userId/register', async function(req, res) {
+app.post('/users/:userId/sockets', async function(req, res) {
 	if (req.header('X-AUTH-TOKEN') != process.env['AUTH_TOKEN']) {
 		res.status(401).send();
 	} else {
 		var userId = req.params['userId'];
-		var connectionId = req.query['connectionId'];
-		if (userId && connectionId) {
-			await pushService.registerUser(userId, connectionId);
+		var socketId = req.body.socket_id;
+		if (userId && socketId) {
+			await pushService.registerUserSocketId(userId, socketId);
 			res.send();
 		} else {
 			res.status(400).send('Bad Request');
@@ -262,7 +182,7 @@ app.put('/api/:userId/register', async function(req, res) {
 /**
  * Api to send message to user.
  */
-app.post('/api/:userId/push', async function(req, res) {
+app.post('/users/:userId/push', async function(req, res) {
 	if (req.header('X-AUTH-TOKEN') != process.env['AUTH_TOKEN']) {
 		res.status(401).send();
 	} else {
@@ -297,19 +217,6 @@ app.get('/api/status/info', function(req, res) {
 });
 
 (async function() {
-	if (process.env.NOTIFICATOR_STORAGE == "mongo") {
-		const username = process.env.MONGO_USERNAME
-		const pw = process.env.MONGO_PASSWORD
-		const domain = process.env.MONGO_DOMAIN
-		const dbname = process.env.MONGO_DBNAME
-		const uri = `mongodb://${username}:${pw}@${domain}/${dbname}?retryWrites=true&writeConcern=majority&authSource=admin`;
-		
-		const client = new MongoClient(uri, { useUnifiedTopology: true });	
-		await client.connect()
-
-		connectionService = connectionServiceMongo(client)
-	};
-
 	http.listen(app.get('port'), function() {
 		console.log('Node app is running on port', app.get('port'));
 	});	
