@@ -1,13 +1,17 @@
 var express = require('express')
 var app = express();
 var http = require('http').Server(app);
-var io = require('socket.io')(http, {
+
+var socketOpts = {
 	path: '/socket.io',
-	cors: {
-		origin: process.env.CORS_ORIGIN || '*',
-		methods: ["GET", "POST"]
-	}
-});
+	cors: process.env.CORS_ORIGIN ? {
+		origin: process.env.CORS_ORIGIN,
+		methods: ["GET", "POST"],
+		credentials: true,
+	} : null
+}
+
+var io = require('socket.io')(http, socketOpts);
 
 app.set('port', (process.env.PORT || 3000));
 
